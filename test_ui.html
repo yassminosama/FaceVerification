@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Identity Verification — Live Test</title>
+    <meta name="description" content="Register with guided Face ID-style capture, run a live webcam interview, and verify identity match using ArcFace embeddings.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* ===== RESET & BASE ===== */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-primary: #0a0e1a;
+            --bg-secondary: #111827;
+            --bg-card: rgba(17, 24, 39, 0.7);
+            --bg-glass: rgba(255, 255, 255, 0.04);
+            --border-glass: rgba(255, 255, 255, 0.08);
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-blue-glow: rgba(59, 130, 246, 0.3);
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-green-glow: rgba(16, 185, 129, 0.3);
+            --accent-red: #ef4444;
+            --accent-red-glow: rgba(239, 68, 68, 0.3);
+            --accent-amber: #f59e0b;
+            --accent-purple: #8b5cf6;
+            --radius: 16px;
+            --radius-sm: 10px;
+            --radius-xs: 6px;
+            --shadow-lg: 0 20px 60px rgba(0,0,0,0.5);
+            --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%; left: -50%;
+            width: 200%; height: 200%;
+            background:
+                radial-gradient(circle at 30% 20%, rgba(59,130,246,0.08) 0%, transparent 50%),
+                radial-gradient(circle at 70% 80%, rgba(139,92,246,0.06) 0%, transparent 50%),
+                radial-gradient(circle at 50% 50%, rgba(6,182,212,0.04) 0%, transparent 50%);
+            animation: bgShift 20s ease-in-out infinite alternate;
+            z-index: 0; pointer-events: none;
+        }
+        @keyframes bgShift {
+            0%   { transform: translate(0,0) rotate(0deg); }
+            100% { transform: translate(-5%,-3%) rotate(3deg); }
+        }
+
+        .app-container { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 40px 24px 60px; }
+
+        /* ===== HEADER ===== */
+        .header { text-align: center; margin-bottom: 48px; }
+        .header-badge {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2);
+            border-radius: 50px; padding: 6px 16px; font-size: 12px; font-weight: 600;
+            color: var(--accent-blue); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 16px;
+        }
+        .header-badge .dot { width: 6px; height: 6px; background: var(--accent-green); border-radius: 50%; animation: pulseDot 2s ease-in-out infinite; }
+        @keyframes pulseDot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(0.7); } }
+        .header h1 {
+            font-size: 36px; font-weight: 800; letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #f1f5f9 0%, #94a3b8 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 8px;
+        }
+        .header p { font-size: 15px; color: var(--text-muted); }
+
+        /* ===== STEPPER ===== */
+        .stepper { display: flex; justify-content: center; align-items: center; gap: 0; margin-bottom: 40px; }
+        .step-item { display: flex; align-items: center; gap: 10px; }
+        .step-circle {
+            width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 14px; font-weight: 700; border: 2px solid var(--border-glass); color: var(--text-muted);
+            background: var(--bg-glass); transition: var(--transition);
+        }
+        .step-item.active .step-circle { border-color: var(--accent-blue); color: #fff; background: var(--accent-blue); box-shadow: 0 0 20px var(--accent-blue-glow); }
+        .step-item.done  .step-circle { border-color: var(--accent-green); color: #fff; background: var(--accent-green); }
+        .step-label { font-size: 13px; font-weight: 500; color: var(--text-muted); transition: var(--transition); }
+        .step-item.active .step-label { color: var(--text-primary); }
+        .step-item.done  .step-label { color: var(--accent-green); }
+        .step-connector { width: 60px; height: 2px; background: var(--border-glass); margin: 0 12px; transition: var(--transition); }
+        .step-connector.done { background: var(--accent-green); }
+
+        /* ===== PANELS ===== */
+        .panel { display: none; animation: fadeSlideIn 0.5s ease; }
+        .panel.visible { display: block; }
+        @keyframes fadeSlideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ===== CARD ===== */
+        .card {
+            background: var(--bg-card); border: 1px solid var(--border-glass); border-radius: var(--radius);
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+            padding: 36px; box-shadow: var(--shadow-lg);
+        }
+        .card-title    { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+        .card-subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 28px; }
+
+        /* ===== FORM ===== */
+        .form-group { margin-bottom: 22px; }
+        .form-label {
+            display: block; font-size: 13px; font-weight: 600; color: var(--text-secondary);
+            margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .form-input {
+            width: 100%; padding: 12px 16px; background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border-glass); border-radius: var(--radius-sm);
+            color: var(--text-primary); font-family: inherit; font-size: 15px; outline: none; transition: var(--transition);
+        }
+        .form-input:focus { border-color: var(--accent-blue); box-shadow: 0 0 0 3px var(--accent-blue-glow); }
+        .form-input::placeholder { color: var(--text-muted); }
+
+        /* ===== BUTTONS ===== */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            padding: 13px 28px; border: none; border-radius: var(--radius-sm); font-family: inherit;
+            font-size: 14px; font-weight: 600; cursor: pointer; transition: var(--transition);
+            position: relative; overflow: hidden;
+        }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-primary { background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)); color: #fff; box-shadow: 0 4px 20px var(--accent-blue-glow); }
+        .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 30px var(--accent-blue-glow); }
+        .btn-green   { background: linear-gradient(135deg, var(--accent-green), #059669); color: #fff; box-shadow: 0 4px 20px var(--accent-green-glow); }
+        .btn-green:hover:not(:disabled)   { transform: translateY(-2px); box-shadow: 0 8px 30px var(--accent-green-glow); }
+        .btn-danger  { background: linear-gradient(135deg, var(--accent-red), #dc2626); color: #fff; box-shadow: 0 4px 20px var(--accent-red-glow); }
+        .btn-danger:hover:not(:disabled)  { transform: translateY(-2px); box-shadow: 0 8px 30px var(--accent-red-glow); }
+        .btn-outline { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-glass); }
+        .btn-outline:hover:not(:disabled) { background: var(--bg-glass); color: var(--text-primary); }
+        .btn-block { width: 100%; }
+
+        /* ===== SPINNER ===== */
+        .spinner { display: none; width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; }
+        .spinner.visible { display: inline-block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ===== WEBCAM WRAPPER ===== */
+        .webcam-wrapper {
+            position: relative; width: 100%; max-width: 640px; margin: 0 auto;
+            border-radius: var(--radius); overflow: hidden; background: #000; aspect-ratio: 4/3;
+        }
+        .webcam-wrapper video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .webcam-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: space-between; pointer-events: none; }
+        .webcam-top-bar { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; background: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent); }
+        .rec-badge { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; color: #fff; text-transform: uppercase; letter-spacing: 1px; }
+        .rec-badge .rec-dot { width: 8px; height: 8px; background: var(--accent-red); border-radius: 50%; animation: pulseDot 1s ease-in-out infinite; }
+        .timer-badge { font-size: 14px; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; }
+
+        /* Interview scan frame (static, only in interview panel) */
+        .scan-frame {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 200px; height: 260px; border: 2px solid rgba(59,130,246,0.4);
+            border-radius: 50% 50% 45% 45%; animation: scanPulse 2.5s ease-in-out infinite;
+            pointer-events: none;
+        }
+        @keyframes scanPulse {
+            0%, 100% { border-color: rgba(59,130,246,0.3); box-shadow: 0 0 30px rgba(59,130,246,0.1); }
+            50%       { border-color: rgba(59,130,246,0.7); box-shadow: 0 0 40px rgba(59,130,246,0.2); }
+        }
+
+        /* Flash overlay */
+        .snapshot-flash { position: absolute; inset: 0; background: rgba(255,255,255,0.72); opacity: 0; pointer-events: none; z-index: 5; }
+        .snapshot-flash.fire { animation: flashAnim 0.35s ease; }
+        @keyframes flashAnim { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+        /* ========================================================
+           FACE ID-STYLE SVG OVAL OVERLAY
+           ======================================================== */
+
+        /* Container fills the webcam wrapper */
+        .face-oval-container {
+            position: absolute; inset: 0;
+            pointer-events: none; z-index: 3;
+        }
+        .face-oval-svg { width: 100%; height: 100%; }
+
+        /* 5 arc segments – one per pose */
+        /* Oval rx=150 ry=188 → perimeter ≈ 1065
+           Each segment: drawn=205 skip=860 → dasharray="205 860"
+           Segment offsets (negative) every 213px                        */
+        .arc-segment {
+            fill: none;
+            stroke-width: 5;
+            stroke-linecap: round;
+            stroke: rgba(255,255,255,0.18);
+            transition: stroke 0.5s ease, stroke-opacity 0.3s ease;
+        }
+        .arc-segment.active {
+            stroke: var(--accent-cyan);
+            animation: arcPulse 1.2s ease-in-out infinite;
+        }
+        .arc-segment.done { stroke: var(--accent-green); animation: none; }
+        @keyframes arcPulse {
+            0%, 100% { stroke-opacity: 1; }
+            50%       { stroke-opacity: 0.5; }
+        }
+
+        /* Oval outline — changes colour based on face-detection state */
+        .oval-outline {
+            fill: none; stroke-width: 3;
+            stroke: rgba(255,255,255,0.14);
+            transition: stroke 0.4s ease, filter 0.4s ease;
+        }
+        .oval-outline.face-ok {
+            stroke: var(--accent-green);
+            filter: drop-shadow(0 0 10px rgba(16,185,129,0.55));
+        }
+        .oval-outline.face-missing {
+            stroke: rgba(245,158,11,0.55);
+            animation: missingPulse 1.8s ease-in-out infinite;
+        }
+        .oval-outline.face-capturing {
+            stroke: var(--accent-cyan);
+            filter: drop-shadow(0 0 14px rgba(6,182,212,0.75));
+        }
+        @keyframes missingPulse {
+            0%, 100% { stroke-opacity: 1; }
+            50%       { stroke-opacity: 0.35; }
+        }
+
+        /* Completion burst */
+        .oval-svg-complete { animation: completeGlow 0.75s cubic-bezier(0.34,1.56,0.64,1); }
+        @keyframes completeGlow {
+            0%   { filter: drop-shadow(0 0 0px rgba(16,185,129,0)); }
+            50%  { filter: drop-shadow(0 0 30px rgba(16,185,129,0.9)); }
+            100% { filter: drop-shadow(0 0 12px rgba(16,185,129,0.45)); }
+        }
+
+        /* ===== CAMERA FLIP BUTTON ===== */
+        .btn-cam-flip {
+            position: absolute; top: 12px; right: 12px; z-index: 6;
+            width: 36px; height: 36px; border-radius: 50%;
+            border: none; cursor: pointer;
+            background: rgba(0,0,0,0.45); backdrop-filter: blur(8px);
+            display: flex; align-items: center; justify-content: center;
+            transition: var(--transition); color: #fff; pointer-events: all;
+        }
+        .btn-cam-flip:hover { background: rgba(255,255,255,0.2); transform: scale(1.1); }
+        .btn-cam-flip svg { width: 17px; height: 17px; }
+
+        /* ===== POSE INSTRUCTION BOX ===== */
+        .pose-instruction-box {
+            margin-top: 18px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.09);
+            border-radius: var(--radius-sm);
+            padding: 14px 18px;
+            display: flex; align-items: center; gap: 14px; min-height: 72px;
+        }
+        .pose-icon-circle {
+            width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
+            background: rgba(59,130,246,0.12); border: 2px solid rgba(59,130,246,0.45);
+            display: flex; align-items: center; justify-content: center;
+            transition: var(--transition);
+        }
+        .pose-icon-circle.ok { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.5); }
+        .pose-icon-circle svg { width: 22px; height: 22px; color: var(--accent-blue); transition: var(--transition); }
+        .pose-icon-circle.ok svg { color: var(--accent-green); }
+        .pose-text-wrap { flex: 1; min-width: 0; }
+        .pose-main-text { font-size: 16px; font-weight: 700; color: var(--text-primary); }
+        .pose-sub-text  { font-size: 12px; color: var(--text-muted); margin-top: 3px; transition: var(--transition); }
+        .face-status-pill {
+            flex-shrink: 0; white-space: nowrap;
+            font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 50px;
+            background: rgba(245,158,11,0.12); color: var(--accent-amber);
+            border: 1px solid rgba(245,158,11,0.25); transition: var(--transition);
+        }
+        .face-status-pill.detected {
+            background: rgba(16,185,129,0.12); color: var(--accent-green);
+            border-color: rgba(16,185,129,0.28);
+        }
+
+        /* ===== POSE PROGRESS DOTS ===== */
+        .pose-dots { display: flex; justify-content: center; gap: 10px; margin-top: 16px; }
+        .pose-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: rgba(255,255,255,0.12); border: 1.5px solid rgba(255,255,255,0.15);
+            transition: var(--transition); position: relative;
+        }
+        .pose-dot.active { background: var(--accent-blue); border-color: var(--accent-blue); box-shadow: 0 0 10px var(--accent-blue-glow); transform: scale(1.35); }
+        .pose-dot.done   { background: var(--accent-green); border-color: var(--accent-green); }
+        .pose-dot-label {
+            position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+            font-size: 9px; color: var(--text-muted); white-space: nowrap;
+            font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px;
+        }
+        .pose-dot.active .pose-dot-label { color: var(--accent-blue); }
+        .pose-dot.done   .pose-dot-label { color: var(--accent-green); }
+
+        /* ===== CAPTURED THUMBNAILS ===== */
+        .capture-thumbs { display: flex; justify-content: center; gap: 10px; margin-top: 40px; flex-wrap: wrap; }
+        .thumb-slot {
+            width: 80px; height: 80px; border-radius: var(--radius-xs); overflow: hidden;
+            border: 2px solid var(--border-glass); background: rgba(255,255,255,0.03);
+            position: relative; transition: border-color var(--transition);
+        }
+        .thumb-slot.captured {
+            border-color: var(--accent-green);
+            animation: thumbSpring 0.45s cubic-bezier(0.34,1.56,0.64,1);
+        }
+        @keyframes thumbSpring {
+            0%   { transform: scale(0.45); opacity: 0; }
+            100% { transform: scale(1);    opacity: 1; }
+        }
+        .thumb-slot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .thumb-slot .thumb-check {
+            position: absolute; top: 4px; right: 4px; width: 18px; height: 18px;
+            background: var(--accent-green); border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .thumb-slot .thumb-check svg { width: 10px; height: 10px; color: #fff; }
+        .thumb-slot .thumb-label {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: rgba(0,0,0,0.62); font-size: 8px; font-weight: 600;
+            color: #fff; text-align: center; padding: 2px;
+            text-transform: uppercase; letter-spacing: 0.3px;
+        }
+
+        /* ===== INTERVIEW-SPECIFIC ===== */
+        .capture-progress-bar { width: 100%; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; margin-top: 16px; overflow: hidden; }
+        .capture-progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-blue), var(--accent-cyan)); border-radius: 2px; transition: width 1s linear; }
+        .interview-info { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 0 4px; }
+        .capture-counter { font-size: 12px; font-weight: 600; color: var(--text-muted); }
+        .capture-counter span { color: var(--accent-cyan); }
+        .next-capture-text { font-size: 12px; color: var(--text-muted); }
+
+        .snapshot-feed { margin-top: 20px; max-height: 200px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent; }
+        .snapshot-feed::-webkit-scrollbar { width: 4px; }
+        .snapshot-feed::-webkit-scrollbar-track { background: transparent; }
+        .snapshot-feed::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+        .snap-entry { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--bg-glass); border: 1px solid var(--border-glass); border-radius: var(--radius-xs); margin-bottom: 8px; animation: fadeSlideIn 0.3s ease; }
+        .snap-entry .snap-num  { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+        .snap-entry.matched   .snap-num { background: rgba(16,185,129,0.15); color: var(--accent-green); }
+        .snap-entry.not-matched .snap-num { background: rgba(239,68,68,0.15); color: var(--accent-red); }
+        .snap-entry.pending   .snap-num { background: rgba(59,130,246,0.15); color: var(--accent-blue); }
+        .snap-entry .snap-info { flex: 1; min-width: 0; }
+        .snap-entry .snap-info .snap-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+        .snap-entry .snap-info .snap-time  { font-size: 11px; color: var(--text-muted); }
+        .snap-entry .snap-score { font-size: 15px; font-weight: 700; flex-shrink: 0; }
+        .snap-entry.matched   .snap-score { color: var(--accent-green); }
+        .snap-entry.not-matched .snap-score { color: var(--accent-red); }
+        .snap-entry.pending   .snap-score { color: var(--accent-blue); }
+        .snap-entry .snap-badge { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 50px; flex-shrink: 0; }
+        .snap-entry.matched   .snap-badge { background: rgba(16,185,129,0.15); color: var(--accent-green); }
+        .snap-entry.not-matched .snap-badge { background: rgba(239,68,68,0.15); color: var(--accent-red); }
+
+        /* ===== RESULTS ===== */
+        .result-card { text-align: center; padding: 48px 36px; }
+        .result-icon-wrapper { width: 100px; height: 100px; margin: 0 auto 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; animation: resultPop 0.6s cubic-bezier(0.34,1.56,0.64,1); }
+        @keyframes resultPop { 0% { transform: scale(0); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+        .result-icon-wrapper.matched    { background: rgba(16,185,129,0.15); box-shadow: 0 0 60px var(--accent-green-glow); }
+        .result-icon-wrapper.not-matched { background: rgba(239,68,68,0.15);  box-shadow: 0 0 60px var(--accent-red-glow); }
+        .result-icon-wrapper svg { width: 48px; height: 48px; }
+        .result-label { font-size: 28px; font-weight: 800; margin-bottom: 8px; animation: fadeSlideIn 0.5s ease 0.2s both; }
+        .result-label.matched    { color: var(--accent-green); }
+        .result-label.not-matched { color: var(--accent-red); }
+        .result-desc { font-size: 14px; color: var(--text-muted); margin-bottom: 32px; animation: fadeSlideIn 0.5s ease 0.3s both; }
+        .score-gauge { width: 180px; height: 180px; margin: 0 auto 28px; position: relative; animation: fadeSlideIn 0.5s ease 0.15s both; }
+        .score-gauge svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+        .score-gauge .track    { fill: none; stroke: rgba(255,255,255,0.06); stroke-width: 10; }
+        .score-gauge .progress { fill: none; stroke-width: 10; stroke-linecap: round; transition: stroke-dashoffset 1.5s cubic-bezier(0.4,0,0.2,1); }
+        .score-value  { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .score-number { font-size: 42px; font-weight: 800; }
+        .score-unit   { font-size: 14px; color: var(--text-muted); font-weight: 500; }
+        .stats-row    { display: flex; justify-content: center; gap: 32px; margin-bottom: 32px; animation: fadeSlideIn 0.5s ease 0.4s both; }
+        .stat-item    { text-align: center; }
+        .stat-value   { font-size: 18px; font-weight: 700; color: var(--text-primary); }
+        .stat-label   { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
+        .btn-group    { display: flex; justify-content: center; gap: 12px; animation: fadeSlideIn 0.5s ease 0.5s both; }
+
+        /* ===== STATUS TOAST ===== */
+        .status-bar {
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(100px);
+            background: var(--bg-secondary); border: 1px solid var(--border-glass); border-radius: var(--radius-sm);
+            padding: 12px 24px; font-size: 13px; font-weight: 500; color: var(--text-secondary);
+            box-shadow: var(--shadow-lg); backdrop-filter: blur(20px); z-index: 100;
+            transition: transform 0.4s cubic-bezier(0.4,0,0.2,1);
+            display: flex; align-items: center; gap: 10px; max-width: 90vw;
+        }
+        .status-bar.visible { transform: translateX(-50%) translateY(0); }
+        .status-bar.error   { border-color: rgba(239,68,68,0.3); color: var(--accent-red); }
+        .status-bar.success { border-color: rgba(16,185,129,0.3); color: var(--accent-green); }
+
+        #snapshotCanvas { display: none; }
+
+        @media (max-width: 640px) {
+            .app-container { padding: 24px 16px 40px; }
+            .header h1 { font-size: 24px; }
+            .card { padding: 24px; }
+            .step-label { display: none; }
+            .step-connector { width: 30px; }
+            .stats-row { gap: 16px; }
+            .btn-group { flex-direction: column; }
+            .capture-thumbs { gap: 6px; }
+            .thumb-slot { width: 60px; height: 60px; }
+            .pose-instruction-box { padding: 12px 14px; gap: 10px; }
+            .pose-main-text { font-size: 14px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+
+    <header class="header">
+        <div class="header-badge"><span class="dot"></span> Live Verification</div>
+        <h1>AI Identity Verification</h1>
+        <p>Register with guided face capture, run a webcam interview, and verify identity match</p>
+    </header>
+
+    <div class="stepper" id="stepper">
+        <div class="step-item active" data-step="1">
+            <div class="step-circle">1</div>
+            <span class="step-label">Register</span>
+        </div>
+        <div class="step-connector" id="conn1"></div>
+        <div class="step-item" data-step="2">
+            <div class="step-circle">2</div>
+            <span class="step-label">Interview</span>
+        </div>
+        <div class="step-connector" id="conn2"></div>
+        <div class="step-item" data-step="3">
+            <div class="step-circle">3</div>
+            <span class="step-label">Results</span>
+        </div>
+    </div>
+
+    <!-- ===== PANEL 1: REGISTER (GUIDED CAMERA — FaceID style) ===== -->
+    <div class="panel visible" id="panel-register">
+        <div class="card">
+            <div class="card-title">Register Candidate</div>
+            <div class="card-subtitle">Enter a candidate ID, then follow the guided face capture</div>
+
+            <div class="form-group">
+                <label class="form-label" for="candidateId">Candidate ID</label>
+                <input class="form-input" type="text" id="candidateId" placeholder="e.g. john_doe_2026" autocomplete="off">
+            </div>
+
+            <!-- Pre-capture: start button -->
+            <div id="preCaptureArea">
+                <button class="btn btn-primary btn-block" id="btnStartCapture" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                    </svg>
+                    Start Face Capture
+                </button>
+            </div>
+
+            <!-- During capture: webcam + FaceID oval guide -->
+            <div id="captureArea" style="display:none;">
+
+                <div class="webcam-wrapper" id="regWebcamWrapper">
+                    <video id="regWebcamVideo" autoplay playsinline muted></video>
+                    <div class="snapshot-flash" id="regFlash"></div>
+
+                    <!-- ── FaceID-style SVG overlay ── -->
+                    <!--
+                        Oval: cx=320 cy=232 rx=150 ry=188   (portrait face shape)
+                        Perimeter ≈ 1065 px
+                        Per segment: drawn=205 skip=860  (dasharray="205 860")
+                        Gap between segments: 8 px (1065/5 = 213, drawn 205 → 8 gap)
+                        Arc group is rotated -90° so segment 0 starts at the top (12 o'clock)
+                        Segment offsets (negative dashoffset) = 0, -213, -426, -639, -852
+                    -->
+                    <div class="face-oval-container" id="faceOvalContainer">
+                        <svg id="faceOvalSvg" class="face-oval-svg"
+                             viewBox="0 0 640 480"
+                             xmlns="http://www.w3.org/2000/svg"
+                             preserveAspectRatio="xMidYMid meet">
+                            <defs>
+                                <!-- Mask: white=show, black=hide → dark rect hides inside oval -->
+                                <mask id="ovalDimMask">
+                                    <rect width="640" height="480" fill="white"/>
+                                    <ellipse cx="320" cy="232" rx="150" ry="188" fill="black"/>
+                                </mask>
+                            </defs>
+
+                            <!-- Dimmed overlay outside the oval -->
+                            <rect x="0" y="0" width="640" height="480"
+                                  fill="black" fill-opacity="0.48"
+                                  mask="url(#ovalDimMask)"/>
+
+                            <!-- 5 liveness arc segments (rotate -90° → start at top) -->
+                            <g transform="rotate(-90, 320, 232)">
+                                <ellipse id="arc0" class="arc-segment"
+                                    cx="320" cy="232" rx="150" ry="188"
+                                    stroke-dasharray="205 860" stroke-dashoffset="0"/>
+                                <ellipse id="arc1" class="arc-segment"
+                                    cx="320" cy="232" rx="150" ry="188"
+                                    stroke-dasharray="205 860" stroke-dashoffset="-213"/>
+                                <ellipse id="arc2" class="arc-segment"
+                                    cx="320" cy="232" rx="150" ry="188"
+                                    stroke-dasharray="205 860" stroke-dashoffset="-426"/>
+                                <ellipse id="arc3" class="arc-segment"
+                                    cx="320" cy="232" rx="150" ry="188"
+                                    stroke-dasharray="205 860" stroke-dashoffset="-639"/>
+                                <ellipse id="arc4" class="arc-segment"
+                                    cx="320" cy="232" rx="150" ry="188"
+                                    stroke-dasharray="205 860" stroke-dashoffset="-852"/>
+                            </g>
+
+                            <!-- Oval outline — colour reflects face-detection state -->
+                            <ellipse id="ovalOutline" class="oval-outline"
+                                cx="320" cy="232" rx="150" ry="188"/>
+                        </svg>
+                    </div>
+                    <!-- ─────────────────────────────────────── -->
+
+                    <!-- Camera flip (useful on mobile) -->
+                    <button class="btn-cam-flip" id="btnCamFlip" title="Flip camera">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Pose instruction box (below camera) -->
+                <div class="pose-instruction-box" id="poseInstructionBox" style="display:none;">
+                    <div class="pose-icon-circle" id="poseIconCircle">
+                        <svg id="poseIconSvg" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" stroke-width="2.5">
+                            <circle cx="12" cy="12" r="10"/>
+                        </svg>
+                    </div>
+                    <div class="pose-text-wrap">
+                        <div class="pose-main-text" id="poseMainText">Look Straight Ahead</div>
+                        <div class="pose-sub-text"  id="poseSubText">Position your face in the oval</div>
+                    </div>
+                    <div class="face-status-pill" id="faceStatusPill">Detecting...</div>
+                </div>
+
+                <!-- Pose progress dots -->
+                <div class="pose-dots" id="poseDots">
+                    <div class="pose-dot" data-pose="0"><span class="pose-dot-label">Forward</span></div>
+                    <div class="pose-dot" data-pose="1"><span class="pose-dot-label">Left</span></div>
+                    <div class="pose-dot" data-pose="2"><span class="pose-dot-label">Right</span></div>
+                    <div class="pose-dot" data-pose="3"><span class="pose-dot-label">Up</span></div>
+                    <div class="pose-dot" data-pose="4"><span class="pose-dot-label">Down</span></div>
+                </div>
+
+                <!-- Captured thumbnails -->
+                <div class="capture-thumbs" id="captureThumbs">
+                    <div class="thumb-slot" id="thumb-0"><span class="thumb-label">Forward</span></div>
+                    <div class="thumb-slot" id="thumb-1"><span class="thumb-label">Left</span></div>
+                    <div class="thumb-slot" id="thumb-2"><span class="thumb-label">Right</span></div>
+                    <div class="thumb-slot" id="thumb-3"><span class="thumb-label">Up</span></div>
+                    <div class="thumb-slot" id="thumb-4"><span class="thumb-label">Down</span></div>
+                </div>
+            </div>
+
+            <!-- Post-capture: submit button -->
+            <div id="postCaptureArea" style="display:none; margin-top: 24px;">
+                <button class="btn btn-green btn-block" id="btnSubmitReg">
+                    <span class="spinner" id="spinnerReg"></span>
+                    Register &amp; Continue
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== PANEL 2: INTERVIEW ===== -->
+    <div class="panel" id="panel-interview">
+        <div class="card" style="padding: 24px;">
+            <div style="text-align:center; margin-bottom: 20px;">
+                <div class="card-title">Live Interview</div>
+                <div class="card-subtitle" style="margin-bottom:0;">Auto-capturing snapshots every 10 seconds. Click Stop when finished.</div>
+            </div>
+
+            <div class="webcam-wrapper" id="webcamWrapper">
+                <video id="webcamVideo" autoplay playsinline muted></video>
+                <div class="webcam-overlay">
+                    <div class="webcam-top-bar">
+                        <div class="rec-badge"><span class="rec-dot"></span> REC</div>
+                        <div class="timer-badge" id="timer">00:00</div>
+                    </div>
+                </div>
+                <div class="scan-frame"></div>
+                <div class="snapshot-flash" id="snapshotFlash"></div>
+            </div>
+
+            <div class="capture-progress-bar">
+                <div class="capture-progress-fill" id="captureProgressFill"></div>
+            </div>
+            <div class="interview-info">
+                <div class="capture-counter" id="captureCounter">Snapshots: <span>0</span></div>
+                <div class="next-capture-text" id="nextCaptureText">Next capture in 10s</div>
+            </div>
+            <div class="snapshot-feed" id="snapshotFeed"></div>
+
+            <div style="display:flex; justify-content:center; gap:12px; margin-top:20px;">
+                <button class="btn btn-danger" id="btnStop">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>
+                    Stop Interview
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== PANEL 3: RESULTS ===== -->
+    <div class="panel" id="panel-results">
+        <div class="card result-card" id="resultCard"></div>
+    </div>
+</div>
+
+<canvas id="snapshotCanvas"></canvas>
+
+<div class="status-bar" id="statusBar">
+    <span class="spinner visible" id="spinnerStatus"></span>
+    <span id="statusText">Processing...</span>
+</div>
+
+<script>
+// ======= DOM REFS =======
+const $ = s => document.querySelector(s);
+const panels    = { register: $('#panel-register'), interview: $('#panel-interview'), results: $('#panel-results') };
+const steps     = document.querySelectorAll('.step-item');
+const connectors = [document.getElementById('conn1'), document.getElementById('conn2')];
+
+const candidateInput  = $('#candidateId');
+const btnStartCapture = $('#btnStartCapture');
+const preCaptureArea  = $('#preCaptureArea');
+const captureArea     = $('#captureArea');
+const postCaptureArea = $('#postCaptureArea');
+const regVideo        = $('#regWebcamVideo');
+const regFlash        = $('#regFlash');
+const poseDots        = document.querySelectorAll('.pose-dot');
+const btnSubmitReg    = $('#btnSubmitReg');
+const spinnerReg      = $('#spinnerReg');
+
+const btnStop             = $('#btnStop');
+const webcamVideo         = $('#webcamVideo');
+const timerEl             = $('#timer');
+const snapshotCanvas      = $('#snapshotCanvas');
+const resultCard          = $('#resultCard');
+const statusBar           = $('#statusBar');
+const statusText          = $('#statusText');
+const spinnerStatus       = $('#spinnerStatus');
+const snapshotFlash       = $('#snapshotFlash');
+const captureProgressFill = $('#captureProgressFill');
+const captureCounter      = $('#captureCounter');
+const nextCaptureText     = $('#nextCaptureText');
+const snapshotFeed        = $('#snapshotFeed');
+
+const API_BASE        = window.location.origin;
+const CAPTURE_INTERVAL = 10; // seconds between interview snapshots
+let   serverThreshold  = 60; // default; updated from /health on load
+
+// Fetch the real threshold from the backend so the UI stays in sync
+fetch(`${API_BASE}/health`).then(r => r.json()).then(d => {
+    if (d.threshold) serverThreshold = Math.round(d.threshold * 100);
+}).catch(() => { /* keep default */ });
+
+// ======= POSE DEFINITIONS =======
+// Each pose = one arc segment captured.  icon = SVG path/shape content.
+const POSES = [
+    {
+        label: 'Look Straight Ahead',
+        sub:   'Face the camera directly',
+        icon:  `<circle cx="12" cy="8.5" r="3.5" fill="none" stroke-width="2.2"/>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M6 21v-1a6 6 0 0112 0v1"/>`,
+    },
+    {
+        label: 'Turn Head Left',
+        sub:   'Slowly rotate to your left',
+        icon:  `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 12H5M5 12l7-7M5 12l7 7"/>`,
+    },
+    {
+        label: 'Turn Head Right',
+        sub:   'Slowly rotate to your right',
+        icon:  `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 12h14M19 12l-7-7M19 12l-7 7"/>`,
+    },
+    {
+        label: 'Tilt Head Up',
+        sub:   'Gently raise your chin',
+        icon:  `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 15l7-7 7 7"/>`,
+    },
+    {
+        label: 'Tilt Head Down',
+        sub:   'Lower your chin slightly',
+        icon:  `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>`,
+    },
+];
+const POSE_LABELS = ['Forward', 'Left', 'Right', 'Up', 'Down'];
+
+// ======= STATE =======
+let candidateId      = '';
+let enrollSessionId  = null;
+let regStream        = null;
+let capturedBlobs    = [];
+let mediaStream      = null;
+let timerInterval    = null;
+let seconds          = 0;
+let countdownInterval = null;
+let countdownSeconds = 0;
+let snapshotResults  = [];
+let isCapturing      = false;
+let interviewStopped = false;
+let facingMode       = 'user';
+
+// Face detection state
+let faceDetector          = null;
+let faceDetectorSupported = false;
+let faceInOval            = false;
+let faceDetectActive      = false;
+
+// Web Audio
+let audioCtx = null;
+
+// ======= STEPPER =======
+function setStep(n) {
+    steps.forEach((el, i) => {
+        el.classList.remove('active', 'done');
+        if (i + 1 < n) el.classList.add('done');
+        else if (i + 1 === n) el.classList.add('active');
+    });
+    connectors.forEach((c, i) => c.classList.toggle('done', i + 1 < n));
+}
+function showPanel(name) {
+    Object.values(panels).forEach(p => p.classList.remove('visible'));
+    panels[name].classList.add('visible');
+    panels[name].style.animation = 'none';
+    panels[name].offsetHeight; // force reflow
+    panels[name].style.animation = '';
+}
+
+// ======= STATUS TOAST =======
+function showStatus(msg, type = 'info', duration = 0) {
+    statusText.textContent = msg;
+    statusBar.className = 'status-bar visible' + (type !== 'info' ? ` ${type}` : '');
+    spinnerStatus.classList.toggle('visible', type === 'info');
+    if (duration > 0) setTimeout(() => statusBar.classList.remove('visible'), duration);
+}
+function hideStatus() { statusBar.classList.remove('visible'); }
+
+// ======= CANDIDATE ID INPUT =======
+candidateInput.addEventListener('input', () => {
+    btnStartCapture.disabled = !candidateInput.value.trim();
+});
+
+// =====================================================================
+// WEB AUDIO — subtle two/three-note chimes on capture and completion
+// =====================================================================
+function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    return audioCtx;
+}
+function _playTone(freqs, volumes) {
+    try {
+        const ctx = getAudioCtx();
+        freqs.forEach((freq, i) => {
+            const osc  = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'sine';
+            const t = ctx.currentTime + i * 0.14;
+            osc.frequency.setValueAtTime(freq, t);
+            gain.gain.setValueAtTime(0, t);
+            gain.gain.linearRampToValueAtTime(volumes[i], t + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+            osc.start(t); osc.stop(t + 0.24);
+        });
+    } catch(e) { /* audio not available */ }
+}
+function playCaptureTone()  { _playTone([880, 1108], [0.13, 0.11]); }
+function playCompleteTone() { _playTone([880, 1108, 1320], [0.14, 0.12, 0.10]); }
+
+// =====================================================================
+// FACE DETECTOR — browser FaceDetector API (Chrome/Edge, optional)
+// Falls back to timed capture silently if unsupported.
+// =====================================================================
+function initFaceDetector() {
+    faceDetector = null; faceDetectorSupported = false;
+    if ('FaceDetector' in window) {
+        try {
+            faceDetector = new FaceDetector({ maxDetectedFaces: 1, fastMode: true });
+            faceDetectorSupported = true;
+        } catch(e) { /* not supported */ }
+    }
+}
+
+// Oval normalised in video space (matches SVG oval: cx=320/640, cy=232/480, rx=150/640, ry=188/480)
+const OVAL_N = { cx: 0.500, cy: 0.483, rx: 0.234, ry: 0.392 };
+
+function isFaceCentred(face, vw, vh) {
+    const bb  = face.boundingBox;
+    const fcx = (bb.x + bb.width  * 0.5) / vw;
+    const fcy = (bb.y + bb.height * 0.5) / vh;
+    const dx  = (fcx - OVAL_N.cx) / OVAL_N.rx;
+    const dy  = (fcy - OVAL_N.cy) / OVAL_N.ry;
+    return dx*dx + dy*dy <= 1.3; // generous threshold
+}
+
+async function runFaceDetectionLoop() {
+    const ovalOutline = document.getElementById('ovalOutline');
+    const pill        = document.getElementById('faceStatusPill');
+    faceDetectActive = true;
+
+    while (faceDetectActive && regStream) {
+        try {
+            const faces = await faceDetector.detect(regVideo);
+            const vw    = regVideo.videoWidth  || 640;
+            const vh    = regVideo.videoHeight || 480;
+            const ok    = faces.length === 1 && isFaceCentred(faces[0], vw, vh);
+            faceInOval = ok;
+
+            if (ok) {
+                ovalOutline.className  = 'oval-outline face-ok';
+                pill.textContent       = 'Face Detected ✓';
+                pill.className         = 'face-status-pill detected';
+            } else {
+                ovalOutline.className  = 'oval-outline face-missing';
+                pill.textContent       = faces.length > 1 ? 'Multiple Faces' : 'Centre Your Face';
+                pill.className         = 'face-status-pill';
+            }
+        } catch(e) {
+            faceInOval = true; // on error, allow capture
+        }
+        await sleep(260); // ~4 fps polling
+    }
+}
+
+// ======= ARC SEGMENT HELPERS =======
+function setArcState(i, state) {
+    // state: 'idle' | 'active' | 'done'
+    const arc = document.getElementById(`arc${i}`);
+    if (!arc) return;
+    arc.classList.remove('active', 'done');
+    if (state === 'active') arc.classList.add('active');
+    if (state === 'done')   arc.classList.add('done');
+}
+function resetAllArcs() {
+    for (let i = 0; i < 5; i++) setArcState(i, 'idle');
+}
+
+// ======= CAMERA FLIP (mobile) =======
+document.getElementById('btnCamFlip').addEventListener('click', async () => {
+    if (!regStream) return;
+    facingMode = (facingMode === 'user') ? 'environment' : 'user';
+    regStream.getTracks().forEach(t => t.stop());
+    try {
+        regStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode },
+            audio: false,
+        });
+        regVideo.srcObject = regStream;
+        await regVideo.play();
+    } catch(e) {
+        // revert if failed
+        facingMode = (facingMode === 'user') ? 'environment' : 'user';
+    }
+});
+
+// =====================================================================
+// START FACE CAPTURE — triggered by "Start Face Capture" button
+// =====================================================================
+btnStartCapture.addEventListener('click', async () => {
+    candidateId = candidateInput.value.trim();
+    if (!candidateId) return;
+
+    btnStartCapture.disabled = true;
+
+    try {
+        const fd = new FormData();
+        fd.append('candidate_id', candidateId);
+        const res = await fetch(`${API_BASE}/enroll/start`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) {
+            showStatus(`Error starting session: ${data.detail || 'Unknown'}`, 'error', 5000);
+            btnStartCapture.disabled = false;
+            return;
+        }
+        enrollSessionId = data.session_id;
+    } catch(err) {
+        showStatus(`Network error: ${err.message}`, 'error', 5000);
+        btnStartCapture.disabled = false;
+        return;
+    }
+
+    capturedBlobs = [];
+    preCaptureArea.style.display  = 'none';
+    captureArea.style.display     = 'block';
+    postCaptureArea.style.display = 'none';
+    candidateInput.disabled       = true;
+
+    // Reset thumbnails
+    POSE_LABELS.forEach((lbl, i) => {
+        const slot = document.getElementById(`thumb-${i}`);
+        slot.classList.remove('captured');
+        slot.innerHTML = `<span class="thumb-label">${lbl}</span>`;
+    });
+
+    // Reset dots + arcs + oval
+    poseDots.forEach(d => d.classList.remove('active', 'done'));
+    resetAllArcs();
+    document.getElementById('ovalOutline').className = 'oval-outline face-missing';
+    faceInOval = false; faceDetectActive = false;
+
+    initFaceDetector();
+
+    try {
+        regStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode },
+            audio: false,
+        });
+        regVideo.srcObject = regStream;
+        await regVideo.play();
+        await sleep(700); // let camera warm up
+
+        // Show instruction box
+        document.getElementById('poseInstructionBox').style.display = 'flex';
+
+        if (faceDetectorSupported) {
+            const pill = document.getElementById('faceStatusPill');
+            pill.textContent = 'Detecting...';
+            pill.className   = 'face-status-pill';
+            runFaceDetectionLoop(); // fire-and-forget; stops when faceDetectActive=false
+        } else {
+            // Graceful degradation: silent timed mode
+            faceInOval = true;
+            const pill = document.getElementById('faceStatusPill');
+            pill.textContent = 'Timed Mode';
+            pill.className   = 'face-status-pill detected';
+        }
+
+        await runPoseSequence();
+    } catch (err) {
+        showStatus(`Camera error: ${err.message}`, 'error', 5000);
+        resetRegistration();
+    }
+});
+
+// =====================================================================
+// POSE SEQUENCE — main guided-capture loop (FaceID style)
+// Pose 0 (Forward) is validated server-side before being accepted;
+// up to MAX_POSE_ATTEMPTS retries are given before a full restart.
+// =====================================================================
+async function runPoseSequence() {
+    for (let i = 0; i < POSES.length; i++) {
+        const pose = POSES[i];
+        let poseAccepted = false;
+        let attemptNum   = 0;
+
+        while (!poseAccepted) {
+            attemptNum++;
+
+            // ── Update progress UI ──
+            poseDots.forEach((d, j) => {
+                d.classList.remove('active');
+                if (j < i) d.classList.add('done');
+                if (j === i) d.classList.add('active');
+            });
+            for (let j = 0; j < 5; j++) {
+                setArcState(j, j < i ? 'done' : j === i ? 'active' : 'idle');
+            }
+
+            // ── Update instruction box ──
+            document.getElementById('poseIconSvg').innerHTML = pose.icon;
+            document.getElementById('poseMainText').textContent = pose.label;
+            document.getElementById('poseSubText').textContent  = pose.sub;
+            document.getElementById('poseIconCircle').className = 'pose-icon-circle';
+
+            // ── Gate: wait for face in oval (up to 8 s, then fall through) ──
+            if (faceDetectorSupported) {
+                const waitStart = Date.now();
+                while (!faceInOval && (Date.now() - waitStart) < 8000) {
+                    document.getElementById('poseSubText').textContent = 'Centre your face in the oval';
+                    await sleep(200);
+                }
+                if (faceInOval) {
+                    document.getElementById('poseSubText').textContent = pose.sub;
+                }
+            }
+
+            // ── Brief hold so the user reads the instruction ──
+            const retryLabel = (attemptNum > 1) ? ' (Retry)' : '';
+            showStatus(`Pose ${i + 1} of 5 — ${pose.label}${retryLabel}`);
+            await sleep(900);
+
+            // ── Countdown 3 → 2 → 1 ──
+            for (let c = 3; c >= 1; c--) {
+                document.getElementById('poseSubText').textContent = `Capturing in ${c}...`;
+                showStatus(`Pose ${i + 1} of 5 — capturing in ${c}...`);
+                await sleep(1000);
+            }
+
+            // ── Flash the oval cyan to signal capture ──
+            document.getElementById('ovalOutline').className = 'oval-outline face-capturing';
+
+            // ── Capture! ──
+            const blob = await captureRegFrame(i);
+
+            // ── POST frame to server ──
+            document.getElementById('poseSubText').textContent = 'Analyzing frame...';
+            showStatus('Analyzing frame...');
+
+            try {
+                const fd = new FormData();
+                fd.append('frame', blob, `pose_${i}.jpg`);
+                const res = await fetch(`${API_BASE}/enroll/frame/${enrollSessionId}`, { method: 'POST', body: fd });
+                const data = await res.json();
+
+                if (res.status === 400 && data.detail && data.detail.includes("Too many failed attempts")) {
+                    showStatus(data.detail, 'error', 6000);
+                    document.getElementById('poseMainText').textContent = 'Validation Failed';
+                    document.getElementById('poseSubText').textContent  = 'Too many retries — please restart';
+                    document.getElementById('ovalOutline').className = 'oval-outline face-missing';
+                    await sleep(3000);
+                    resetRegistration();
+                    candidateInput.value = candidateId;
+                    btnStartCapture.disabled = false;
+                    return;
+                }
+
+                if (data.status === 'pose_captured' || data.status === 'enrollment_complete') {
+                    // ── Pose accepted ──
+                    capturedBlobs.push(blob);
+                    poseAccepted = true;
+
+                    playCaptureTone();
+                    setArcState(i, 'done');
+                    poseDots[i].classList.remove('active');
+                    poseDots[i].classList.add('done');
+                    document.getElementById('poseIconCircle').className = 'pose-icon-circle ok';
+                    document.getElementById('poseSubText').textContent  = 'Captured! ✓';
+                    document.getElementById('ovalOutline').className    = 'oval-outline face-ok';
+
+                    await sleep(750);
+
+                    // Reset oval colour for next pose
+                    if (i < POSES.length - 1) {
+                        document.getElementById('ovalOutline').className = faceDetectorSupported
+                            ? 'oval-outline face-missing'
+                            : 'oval-outline face-ok';
+                    }
+                } else {
+                    // ── Capture issue (wrong pose, no face, blurry) ──
+                    const msg = data.message || data.reason || 'Invalid capture';
+                    document.getElementById('ovalOutline').className    = 'oval-outline face-missing';
+                    document.getElementById('poseIconCircle').className = 'pose-icon-circle';
+                    document.getElementById('poseMainText').textContent = '⚠ Retry';
+                    document.getElementById('poseSubText').textContent  = msg;
+                    showStatus(`Issue: ${msg}`, 'error', 3500);
+
+                    // Revert thumbnail
+                    const slot = document.getElementById(`thumb-${i}`);
+                    slot.classList.remove('captured');
+                    slot.innerHTML = `<span class="thumb-label">${POSE_LABELS[i]}</span>`;
+
+                    await sleep(3500);
+                    continue; // loop and retry
+                }
+            } catch (err) {
+                showStatus(`Network error: ${err.message}`, 'error', 3500);
+                await sleep(3500);
+                continue;
+            }
+        } // end while (!poseAccepted)
+    } // end for each pose
+
+    // ── All poses complete ──
+    faceDetectActive = false;
+
+    // Completion glow burst on the SVG
+    const svgEl = document.getElementById('faceOvalSvg');
+    svgEl.classList.add('oval-svg-complete');
+    setTimeout(() => svgEl.classList.remove('oval-svg-complete'), 800);
+
+    playCompleteTone();
+
+    document.getElementById('poseMainText').textContent = 'All Done!';
+    document.getElementById('poseSubText').textContent  = 'Face capture complete — ready to interview';
+    document.getElementById('poseIconCircle').className = 'pose-icon-circle ok';
+    document.getElementById('poseIconSvg').innerHTML    = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>`;
+    document.getElementById('faceStatusPill').textContent = 'Complete ✓';
+    document.getElementById('faceStatusPill').className   = 'face-status-pill detected';
+    document.getElementById('ovalOutline').className      = 'oval-outline face-ok';
+    hideStatus();
+
+    await sleep(900);
+
+    // Stop the registration webcam
+    if (regStream) { regStream.getTracks().forEach(t => t.stop()); regStream = null; }
+
+    // Show submit button
+    postCaptureArea.style.display = 'block';
+    // Change submit button text
+    btnSubmitReg.innerHTML = `Continue to Interview <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="margin-left:6px;"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>`;
+}
+
+// ======= SLEEP HELPER =======
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+
+
+// ======= CAPTURE A SINGLE FRAME & UPDATE THUMBNAIL =======
+async function captureRegFrame(index) {
+    // White flash
+    regFlash.classList.remove('fire'); regFlash.offsetHeight; regFlash.classList.add('fire');
+
+    // Draw current video frame to canvas
+    snapshotCanvas.width  = regVideo.videoWidth  || 640;
+    snapshotCanvas.height = regVideo.videoHeight || 480;
+    snapshotCanvas.getContext('2d').drawImage(regVideo, 0, 0);
+
+    const blob = await new Promise(r => snapshotCanvas.toBlob(r, 'image/jpeg', 0.92));
+
+    // Update thumbnail with spring-in animation
+    const url  = URL.createObjectURL(blob);
+    const slot = document.getElementById(`thumb-${index}`);
+    slot.classList.add('captured');
+    slot.innerHTML = `
+        <img src="${url}" alt="Pose ${index + 1}">
+        <div class="thumb-check">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+            </svg>
+        </div>
+        <span class="thumb-label">${POSE_LABELS[index]}</span>
+    `;
+
+    return blob;
+}
+
+// ======= SUBMIT REGISTRATION =======
+btnSubmitReg.addEventListener('click', async () => {
+    // With the new API, frames are submitted as they are captured.
+    // If the button is clicked, it means enrollment is complete.
+    setStep(2); 
+    showPanel('interview'); 
+    startInterview();
+});
+
+// ======= RESET REGISTRATION =======
+function resetRegistration() {
+    faceDetectActive = false;
+    if (regStream) { regStream.getTracks().forEach(t => t.stop()); regStream = null; }
+    capturedBlobs = [];
+    preCaptureArea.style.display  = 'block';
+    captureArea.style.display     = 'none';
+    postCaptureArea.style.display = 'none';
+    candidateInput.disabled       = false;
+    document.getElementById('poseInstructionBox').style.display = 'none';
+    resetAllArcs();
+    poseDots.forEach(d => d.classList.remove('active', 'done'));
+}
+
+// ======= INTERVIEW (WEBCAM + AUTO-CAPTURE) =======
+async function startInterview() {
+    snapshotResults  = [];
+    snapshotFeed.innerHTML = '';
+    isCapturing      = false;
+    interviewStopped = false;
+    updateCaptureCounter();
+
+    try {
+        mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+            audio: false,
+        });
+        webcamVideo.srcObject = mediaStream;
+
+        seconds = 0; timerEl.textContent = '00:00';
+        timerInterval = setInterval(() => {
+            seconds++;
+            timerEl.textContent =
+                `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+        }, 1000);
+
+        startCaptureCountdown();
+    } catch (err) {
+        showStatus(`Camera access denied: ${err.message}`, 'error', 5000);
+    }
+}
+
+function startCaptureCountdown() {
+    countdownSeconds = CAPTURE_INTERVAL;
+    captureProgressFill.style.transition = 'none';
+    captureProgressFill.style.width      = '0%';
+    nextCaptureText.textContent = `Next capture in ${countdownSeconds}s`;
+    captureProgressFill.offsetHeight; // reflow
+    captureProgressFill.style.transition = `width ${CAPTURE_INTERVAL}s linear`;
+    captureProgressFill.style.width      = '100%';
+
+    countdownInterval = setInterval(() => {
+        countdownSeconds--;
+        if (countdownSeconds <= 0) {
+            nextCaptureText.textContent = 'Capturing...';
+            clearInterval(countdownInterval); countdownInterval = null;
+            takeSnapshot();
+        } else {
+            nextCaptureText.textContent = `Next capture in ${countdownSeconds}s`;
+        }
+    }, 1000);
+}
+
+function stopAllIntervals() {
+    if (timerInterval)     { clearInterval(timerInterval);     timerInterval = null; }
+    if (countdownInterval) { clearInterval(countdownInterval); countdownInterval = null; }
+}
+function stopWebcam() {
+    stopAllIntervals();
+    if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+}
+
+// ======= SNAPSHOT CAPTURE & VERIFY =======
+async function takeSnapshot() {
+    if (isCapturing || interviewStopped) return;
+    isCapturing = true;
+    const snapNum = snapshotResults.length + 1;
+
+    snapshotFlash.classList.remove('fire'); snapshotFlash.offsetHeight; snapshotFlash.classList.add('fire');
+
+    snapshotCanvas.width  = webcamVideo.videoWidth;
+    snapshotCanvas.height = webcamVideo.videoHeight;
+    snapshotCanvas.getContext('2d').drawImage(webcamVideo, 0, 0);
+
+    const pendingId = `snap-pending-${snapNum}`;
+    snapshotFeed.insertAdjacentHTML('afterbegin', `
+        <div class="snap-entry pending" id="${pendingId}">
+            <div class="snap-num">${snapNum}</div>
+            <div class="snap-info">
+                <div class="snap-title">Snapshot #${snapNum}</div>
+                <div class="snap-time">Analyzing...</div>
+            </div>
+            <div class="snap-score">
+                <span class="spinner visible" style="width:14px;height:14px;border-width:2px;"></span>
+            </div>
+        </div>
+    `);
+
+    try {
+        const blob = await new Promise(r => snapshotCanvas.toBlob(r, 'image/jpeg', 0.92));
+        const fd   = new FormData();
+        fd.append('candidate_id', candidateId);
+        fd.append('snapshot', blob, `snapshot_${snapNum}.jpg`);
+
+        const res  = await fetch(`${API_BASE}/verify`, { method: 'POST', body: fd });
+        const data = await res.json();
+        const el   = document.getElementById(pendingId);
+
+        if (res.ok) {
+            const result = {
+                score: data.similarity_score, matched: data.matched,
+                label: data.label, timestamp: new Date().toLocaleTimeString(),
+            };
+            snapshotResults.push(result);
+            updateCaptureCounter();
+            if (el) {
+                el.className = `snap-entry ${result.matched ? 'matched' : 'not-matched'}`;
+                el.innerHTML = `
+                    <div class="snap-num">${snapNum}</div>
+                    <div class="snap-info">
+                        <div class="snap-title">Snapshot #${snapNum}</div>
+                        <div class="snap-time">${result.timestamp}</div>
+                    </div>
+                    <div class="snap-score">${result.score}%</div>
+                    <div class="snap-badge">${result.label}</div>
+                `;
+            }
+        } else if (el) {
+            el.className = 'snap-entry not-matched';
+            el.innerHTML = `
+                <div class="snap-num">${snapNum}</div>
+                <div class="snap-info">
+                    <div class="snap-title">Snapshot #${snapNum}</div>
+                    <div class="snap-time">${new Date().toLocaleTimeString()}</div>
+                </div>
+                <div class="snap-score" style="font-size:11px;color:var(--accent-amber);">${data.detail || 'Error'}</div>
+            `;
+        }
+    } catch (err) {
+        const el = document.getElementById(pendingId);
+        if (el) {
+            el.className = 'snap-entry not-matched';
+            el.innerHTML = `
+                <div class="snap-num">${snapNum}</div>
+                <div class="snap-info">
+                    <div class="snap-title">Snapshot #${snapNum}</div>
+                    <div class="snap-time">${new Date().toLocaleTimeString()}</div>
+                </div>
+                <div class="snap-score" style="font-size:11px;color:var(--accent-amber);">Network error</div>
+            `;
+        }
+    } finally {
+        isCapturing = false;
+        if (!interviewStopped && mediaStream) startCaptureCountdown();
+        if (interviewStopped) finishInterview();
+    }
+}
+
+function updateCaptureCounter() {
+    captureCounter.innerHTML = `Snapshots: <span>${snapshotResults.length}</span>`;
+}
+
+// ======= STOP INTERVIEW =======
+btnStop.addEventListener('click', () => {
+    interviewStopped = true;
+    btnStop.disabled = true;
+    stopAllIntervals();
+    captureProgressFill.style.transition = 'none';
+    captureProgressFill.style.width = '0%';
+    nextCaptureText.textContent = 'Stopped';
+    if (isCapturing) showStatus('Waiting for current capture to finish...');
+    else finishInterview();
+});
+
+function finishInterview() {
+    stopWebcam(); hideStatus();
+    if (snapshotResults.length === 0) {
+        showStatus('No snapshots captured. Try a longer interview.', 'error', 5000);
+        btnStop.disabled = false; interviewStopped = false; startInterview(); return;
+    }
+    setStep(3); showPanel('results'); renderAggregatedResults();
+}
+
+// ======= RENDER RESULTS =======
+function renderAggregatedResults() {
+    const scores        = snapshotResults.map(r => r.score);
+    const avgScore      = parseFloat((scores.reduce((a,b) => a+b,0) / scores.length).toFixed(2));
+    const matchedCount  = snapshotResults.filter(r => r.matched).length;
+    const nonMatchedCount = snapshotResults.length - matchedCount;
+    const overallMatched  = avgScore >= serverThreshold;
+    const overallLabel    = overallMatched ? 'MATCHED' : 'NON-MATCHED';
+    const circ   = 2 * Math.PI * 70;
+    const offset = circ - (avgScore / 100) * circ;
+    const col    = overallMatched ? 'var(--accent-green)' : 'var(--accent-red)';
+
+    resultCard.innerHTML = `
+        <div class="result-icon-wrapper ${overallMatched ? 'matched' : 'not-matched'}">
+            ${overallMatched
+                ? `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="var(--accent-green)" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`
+                : `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="var(--accent-red)"   stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`}
+        </div>
+        <div class="score-gauge">
+            <svg viewBox="0 0 160 160">
+                <circle class="track"    cx="80" cy="80" r="70"/>
+                <circle class="progress" cx="80" cy="80" r="70"
+                    stroke="${col}" stroke-dasharray="${circ}" stroke-dashoffset="${circ}" id="gaugeProgress"/>
+            </svg>
+            <div class="score-value">
+                <div class="score-number" style="color:${col}" id="scoreAnimated">0</div>
+                <div class="score-unit">avg similarity</div>
+            </div>
+        </div>
+        <div class="result-label ${overallMatched ? 'matched' : 'not-matched'}">${overallLabel}</div>
+        <div class="result-desc">Based on ${snapshotResults.length} snapshot${snapshotResults.length > 1 ? 's' : ''} taken during the interview.</div>
+        <div class="stats-row">
+            <div class="stat-item"><div class="stat-value">${candidateId}</div><div class="stat-label">Candidate</div></div>
+            <div class="stat-item"><div class="stat-value">${snapshotResults.length}</div><div class="stat-label">Snapshots</div></div>
+            <div class="stat-item"><div class="stat-value" style="color:var(--accent-green)">${matchedCount}</div><div class="stat-label">Matched</div></div>
+            <div class="stat-item"><div class="stat-value" style="color:var(--accent-red)">${nonMatchedCount}</div><div class="stat-label">Non-Match</div></div>
+            <div class="stat-item"><div class="stat-value">${serverThreshold}%</div><div class="stat-label">Threshold</div></div>
+        </div>
+        <div style="margin:8px 0 28px;text-align:left;max-height:220px;overflow-y:auto;">
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border-glass);">
+                        <th style="padding:10px 12px;text-align:left;color:var(--text-muted);font-weight:600;">#</th>
+                        <th style="padding:10px 12px;text-align:left;color:var(--text-muted);font-weight:600;">Time</th>
+                        <th style="padding:10px 12px;text-align:right;color:var(--text-muted);font-weight:600;">Score</th>
+                        <th style="padding:10px 12px;text-align:center;color:var(--text-muted);font-weight:600;">Result</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${snapshotResults.map((r, i) => `
+                        <tr style="border-bottom:1px solid rgba(255,255,255,0.03);">
+                            <td style="padding:10px 12px;color:var(--text-muted);">${i+1}</td>
+                            <td style="padding:10px 12px;color:var(--text-secondary);">${r.timestamp}</td>
+                            <td style="padding:10px 12px;text-align:right;font-weight:600;">${r.score}%</td>
+                            <td style="padding:10px 12px;text-align:center;">
+                                <span style="display:inline-block;padding:3px 10px;border-radius:50px;font-size:11px;font-weight:700;
+                                    background:${r.matched ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'};
+                                    color:${r.matched ? 'var(--accent-green)' : 'var(--accent-red)'};">${r.label}</span>
+                            </td>
+                        </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-primary" onclick="startOver()">Start Over</button>
+        </div>
+    `;
+
+    requestAnimationFrame(() => setTimeout(() => {
+        const g = document.getElementById('gaugeProgress');
+        if (g) g.style.strokeDashoffset = offset;
+        animateNumber('scoreAnimated', 0, avgScore, 1200);
+    }, 100));
+}
+
+function animateNumber(id, start, end, dur) {
+    const el = document.getElementById(id); if (!el) return;
+    const t0 = performance.now();
+    (function tick(now) {
+        const p = Math.min((now - t0) / dur, 1);
+        el.textContent = (start + (end - start) * (1 - Math.pow(1 - p, 3))).toFixed(1) + '%';
+        if (p < 1) requestAnimationFrame(tick);
+    })(t0);
+}
+
+
+
+// ======= START OVER =======
+function startOver() {
+    stopWebcam();
+    resetRegistration();
+    candidateId      = '';
+    snapshotResults  = [];
+    interviewStopped = false;
+    candidateInput.value    = '';
+    candidateInput.disabled = false;
+    btnStartCapture.disabled = true;
+    btnStop.disabled = false;
+    snapshotFeed.innerHTML  = '';
+    setStep(1);
+    showPanel('register');
+}
+</script>
+
+</body>
+</html>
