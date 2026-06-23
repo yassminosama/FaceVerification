@@ -70,7 +70,6 @@ graph TD
 ```
 
 1. **Step 1: Register**
-   * Enter a unique **Candidate ID**.
    * Grant camera permissions and start the Face Capture.
    * Position your face inside the **FaceID-style SVG oval overlay**.
    * Follow instructions to rotate your head in 5 directions: **Straight/Forward**, **Left**, **Right**, **Up**, and **Down**.
