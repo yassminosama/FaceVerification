@@ -1,16 +1,16 @@
 # API Documentation
 
-> **Base URL:** `http://localhost:8000`
+> **Base URL:** `https://yourusername-faceverificationapi.hf.space` (Hugging Face) or `http://localhost:8000` (local)
 >
-> **Interactive Docs:** [`/docs`](http://localhost:8000/docs) (Swagger UI) · [`/redoc`](http://localhost:8000/redoc) (ReDoc)
+> **Interactive Docs:** [`/docs`](/docs) (Swagger UI) · [`/redoc`](/redoc) (ReDoc)
 
 ---
 
 ## Table of Contents
 
+- [Architecture Overview](#architecture-overview)
 - [System](#1-system)
   - [GET /health](#get-health)
-  - [GET /ui](#get-ui)
 - [Enrollment](#2-guided-multi-pose-enrollment)
   - [POST /enroll/start](#post-enrollstart)
   - [POST /enroll/frame/{session_id}](#post-enrollframesession_id)
@@ -18,7 +18,30 @@
 - [Verification](#3-face-verification)
   - [POST /verify](#post-verify)
 - [Error Reference](#error-reference)
-- [Enrollment Flow Diagram](#enrollment-flow-diagram)
+- [Integration Flow Diagram](#integration-flow-diagram)
+
+---
+
+## Architecture Overview
+
+This service is a **stateless AI microservice** designed to be called by an external main backend. It handles only face recognition logic — no user management, no database access.
+
+```
+┌─────────────────────┐         ┌──────────────────────────────┐
+│   Main Backend      │         │  Face Verification Service   │
+│   (.NET / etc.)     │         │  (this API)                  │
+│                     │         │                              │
+│  • User management  │  HTTP   │  • Face detection            │
+│  • Database (SQL)   │ ──────► │  • Embedding extraction      │
+│  • Interview logic  │ ◄────── │  • Cosine similarity         │
+│  • Stores embeddings│         │  • Multi-face detection      │
+└─────────────────────┘         └──────────────────────────────┘
+```
+
+**Key design principles:**
+- No `candidate_id` is required — the main backend manages identity mapping.
+- Enrollment returns the computed `reference_embedding` directly — the main backend stores it.
+- Verification accepts a `reference_embedding` + `snapshot` — no database lookup needed.
 
 ---
 
@@ -48,37 +71,26 @@ Health check endpoint. Returns service status and configuration.
 
 ---
 
-### `GET /ui`
-
-Serves the live test UI ([test_ui.html](file:///c:/Users/HiTech/Desktop/FaceVerification/test_ui.html)). Opens directly in the browser.
-
-**Response:** `200 OK` — `text/html`
-
----
-
 ## 2. Guided Multi-Pose Enrollment
 
 The enrollment process uses a **session-based** flow. The client starts a session, then submits camera frames one at a time. The server validates each frame against the expected head pose and advances the session automatically.
+
+On completion, the computed `reference_embedding` (a 512-dimensional float array) is returned directly in the response for the main backend to store.
 
 > [!IMPORTANT]
 > Sessions expire after **15 minutes** of inactivity. Abandoned sessions are purged automatically.
 
 ### `POST /enroll/start`
 
-Begin a new enrollment session for a candidate.
+Begin a new enrollment session.
 
-**Request** — `multipart/form-data`
-
-| Field | Type | Required | Description |
-|:---|:---|:---|:---|
-| `candidate_id` | string | ✅ | Unique identifier for the candidate |
+**Request** — No parameters required.
 
 **Response `200 OK`**
 
 ```json
 {
   "session_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-  "candidate_id": "john_doe_2026",
   "required_poses": ["front", "left", "right", "up", "down"],
   "total_poses": 5,
   "message": "Session started. First pose: FRONT"
@@ -88,16 +100,9 @@ Begin a new enrollment session for a candidate.
 | Field | Type | Description |
 |:---|:---|:---|
 | `session_id` | string (UUID) | Pass this to all subsequent `/enroll` calls |
-| `candidate_id` | string | Echo of the provided candidate ID |
 | `required_poses` | string[] | Ordered list of poses to capture |
 | `total_poses` | integer | Total number of poses required |
 | `message` | string | Human-readable status message |
-
-**Error Responses**
-
-| Status | Condition |
-|:---|:---|
-| `409 Conflict` | Candidate is already registered |
 
 ---
 
@@ -142,16 +147,19 @@ The frame was accepted and the session advances to the next pose.
 
 #### Status: `enrollment_complete`
 
-All 5 poses have been captured. The averaged reference embedding is stored.
+All 5 poses have been captured. The averaged reference embedding is returned.
 
 ```json
 {
   "status": "enrollment_complete",
-  "candidate_id": "john_doe_2026",
+  "reference_embedding": [0.0234, -0.0156, 0.0412, "...512 floats total"],
   "poses_captured": ["front", "left", "right", "up", "down"],
-  "message": "All poses captured. Reference embedding stored successfully."
+  "message": "All poses captured. Reference embedding computed successfully."
 }
 ```
+
+> [!IMPORTANT]
+> The `reference_embedding` is a **512-dimensional float array**. Your main backend must store this array in its database, associated with the candidate. Pass it back to `/verify` during interview verification.
 
 #### Status: `wrong_pose`
 
@@ -263,20 +271,25 @@ Rewind the session to re-capture a specific pose. Use this when a previously acc
 
 ### `POST /verify`
 
-Compare a snapshot image against a registered candidate's stored face embedding. The result is logged to `verification_log.json`.
+Compare a snapshot image against a provided reference embedding. The response includes a `status` field that distinguishes between a successful single-face verification and a multi-face detection event.
 
 **Request** — `multipart/form-data`
 
 | Field | Type | Required | Description |
 |:---|:---|:---|:---|
-| `candidate_id` | string | ✅ | ID of the registered candidate |
+| `reference_embedding` | string | ✅ | JSON string of the float array (e.g. `"[0.023, -0.015, ...]"`) retrieved from your database |
 | `snapshot` | file | ✅ | Snapshot image (JPEG/PNG) to verify |
 
-**Response `200 OK`**
+**Response `200 OK`** — The `status` field indicates the result:
+
+#### Status: `success`
+
+A single face was detected and compared against the reference.
 
 ```json
 {
-  "candidate_id": "john_doe_2026",
+  "status": "success",
+  "faces_detected": 1,
   "similarity_score": 78.43,
   "matched": true,
   "label": "MATCHED"
@@ -285,17 +298,40 @@ Compare a snapshot image against a registered candidate's stored face embedding.
 
 | Field | Type | Description |
 |:---|:---|:---|
-| `candidate_id` | string | Echo of the provided candidate ID |
+| `status` | string | `"success"` — single face verified |
+| `faces_detected` | integer | Always `1` for this status |
 | `similarity_score` | float | Cosine similarity percentage (0–100) |
-| `matched` | boolean | `true` if score ≥ threshold × 100 |
+| `matched` | boolean | `true` if score ≥ threshold × 100 (default threshold: 60%) |
 | `label` | string | `"MATCHED"` or `"NON-MATCHED"` |
+
+#### Status: `multiple_faces`
+
+More than one face was detected in the snapshot. No similarity score is computed. The main backend should log this as a flagged event for interview aggregation.
+
+```json
+{
+  "status": "multiple_faces",
+  "faces_detected": 3,
+  "matched": false,
+  "message": "Multiple faces detected (3). Verification requires a single face."
+}
+```
+
+| Field | Type | Description |
+|:---|:---|:---|
+| `status` | string | `"multiple_faces"` — flag for aggregation |
+| `faces_detected` | integer | Number of faces found in the snapshot |
+| `matched` | boolean | Always `false` for this status |
+| `message` | string | Human-readable explanation |
+
+> [!TIP]
+> Use `faces_detected` to count and report multi-face events during interview aggregation. This is a meaningful proctoring signal (e.g., someone coaching the candidate).
 
 **Error Responses**
 
 | Status | Condition |
 |:---|:---|
-| `400 Bad Request` | Multiple faces detected in snapshot |
-| `404 Not Found` | Candidate is not registered |
+| `400 Bad Request` | Invalid `reference_embedding` JSON format |
 | `422 Unprocessable Entity` | No face detected, or image cannot be decoded |
 | `500 Internal Server Error` | Face recognition model error |
 
@@ -317,7 +353,7 @@ All error responses follow this structure:
 |:---|:---|:---|
 | `400` | `Image too small (WxH). Minimum dimension is 80px.` | Image width or height below 80px |
 | `400` | `Image is too blurry (variance=X, minimum=30.0).` | Laplacian variance below threshold |
-| `400` | `Multiple faces detected (N). Please upload an image with a single face.` | More than one face in the image |
+| `400` | `Multiple faces detected (N). Please upload an image with a single face.` | More than one face during **enrollment** |
 | `422` | `Unable to decode the uploaded image.` | Corrupt or unsupported image format |
 | `422` | `No face detected in the uploaded image.` | No face found by detector |
 | `500` | `Face recognition model error: ...` | ArcFace model failure |
@@ -330,39 +366,53 @@ All error responses follow this structure:
 | `400` | `This enrollment session is already complete.` | Frame submitted after completion |
 | `400` | `Too many failed attempts (5) for pose '...'. Enrollment session terminated.` | Retake limit exceeded |
 | `404` | `Enrollment session not found or expired.` | Invalid or expired session ID |
-| `409` | `Candidate '...' is already registered.` | Duplicate enrollment attempt |
+
+### Verification Errors
+
+| Status | Detail | Cause |
+|:---|:---|:---|
+| `400` | `reference_embedding must be a valid JSON array of floats.` | Malformed embedding input |
 
 ---
 
-## Enrollment Flow Diagram
+## Integration Flow Diagram
 
 ```mermaid
 sequenceDiagram
-    participant C as Client
-    participant S as Server
+    participant MB as Main Backend
+    participant FV as Face Verification API
 
-    C->>S: POST /enroll/start (candidate_id)
-    S-->>C: session_id, required_poses
+    rect rgb(40, 60, 80)
+        Note over MB,FV: Enrollment Phase
+        MB->>FV: POST /enroll/start
+        FV-->>MB: session_id, required_poses
 
-    loop For each pose (front → left → right → up → down)
-        C->>S: POST /enroll/frame/{session_id} (frame)
-        alt Pose matches
-            S-->>C: status: "pose_captured", next_pose
-        else Wrong pose
-            S-->>C: status: "wrong_pose" (no retake charged)
-            C->>S: POST /enroll/frame/{session_id} (retry)
-        else No face / bad quality
-            S-->>C: status: "no_face" or "invalid_quality" (retake charged)
-            C->>S: POST /enroll/frame/{session_id} (retry)
+        loop For each pose (front → left → right → up → down)
+            MB->>FV: POST /enroll/frame/{session_id} (frame)
+            alt Pose matches
+                FV-->>MB: status: "pose_captured", next_pose
+            else Wrong pose
+                FV-->>MB: status: "wrong_pose" (no retake charged)
+                MB->>FV: POST /enroll/frame/{session_id} (retry)
+            else No face / bad quality
+                FV-->>MB: status: "no_face" or "invalid_quality" (retake charged)
+                MB->>FV: POST /enroll/frame/{session_id} (retry)
+            end
         end
+
+        FV-->>MB: status: "enrollment_complete", reference_embedding
+        Note over MB: Store reference_embedding in DB<br/>associated with the candidate
     end
 
-    S-->>C: status: "enrollment_complete"
-    Note over S: Reference embedding stored
-
     rect rgb(40, 40, 60)
-        Note over C,S: Verification Phase
-        C->>S: POST /verify (candidate_id, snapshot)
-        S-->>C: similarity_score, matched, label
+        Note over MB,FV: Verification Phase (during interview)
+        MB->>MB: Retrieve reference_embedding from DB
+        MB->>FV: POST /verify (reference_embedding, snapshot)
+        alt Single face
+            FV-->>MB: status: "success", similarity_score, matched
+        else Multiple faces
+            FV-->>MB: status: "multiple_faces", faces_detected
+            Note over MB: Log as flagged proctoring event
+        end
     end
 ```
